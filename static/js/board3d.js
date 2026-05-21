@@ -28,6 +28,7 @@ let lastHoverWasMarble = false;
 const SHARED = {
   marbleGeom: null,
   slotDiscGeom: null,
+  slotHitGeom: null,
 };
 
 function ensureGeoms() {
@@ -35,8 +36,12 @@ function ensureGeoms() {
     SHARED.marbleGeom = new THREE.SphereGeometry(MARBLE_RADIUS, 32, 24);
   }
   if (!SHARED.slotDiscGeom) {
-    // Filled disc so the entire slot is clickable, not just the rim.
-    SHARED.slotDiscGeom = new THREE.CircleGeometry(MARBLE_RADIUS * 0.85, 36);
+    // Visible glow disc — full marble-sized so it's easy to tap on mobile.
+    SHARED.slotDiscGeom = new THREE.CircleGeometry(MARBLE_RADIUS * 1.05, 36);
+  }
+  if (!SHARED.slotHitGeom) {
+    // Invisible larger hit target for fingers (1.4x marble radius).
+    SHARED.slotHitGeom = new THREE.CircleGeometry(MARBLE_RADIUS * 1.4, 24);
   }
 }
 
@@ -99,7 +104,8 @@ function init3D() {
   pointer = new THREE.Vector2();
 
   canvas.addEventListener('pointermove', onPointerMove);
-  canvas.addEventListener('click', onPointerClick);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointerup', onPointerUp);
   document.getElementById('cancel-lift-btn').addEventListener('click', cancelLift);
 
   resizeObserver = new ResizeObserver(resize);
@@ -233,10 +239,30 @@ function updateHover() {
   canvas.style.cursor = nextHover ? 'pointer' : 'grab';
 }
 
-function onPointerClick(e) {
+// Track pointer-down to distinguish taps from drag-rotates.
+let pointerDownX = 0, pointerDownY = 0, pointerDownTime = 0;
+const TAP_PIXEL_THRESHOLD = 10;
+const TAP_TIME_THRESHOLD = 600; // ms
+
+function onPointerDown(e) {
+  pointerDownX = e.clientX;
+  pointerDownY = e.clientY;
+  pointerDownTime = performance.now();
+}
+
+function onPointerUp(e) {
+  const dx = e.clientX - pointerDownX;
+  const dy = e.clientY - pointerDownY;
+  const moved = Math.hypot(dx, dy);
+  const dt = performance.now() - pointerDownTime;
+  if (moved > TAP_PIXEL_THRESHOLD || dt > TAP_TIME_THRESHOLD) return;
   if (!state.game) return;
   if (state.pending) return;
-  // ignore clicks from drag-rotate (OrbitControls suppresses small ones already)
+
+  // Sync raycaster to the release point (touch doesn't fire pointermove).
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
   const slotHits = raycaster.intersectObjects(slotGroup.children, false);
@@ -427,7 +453,7 @@ function addSlotIndicator(lv, r, c, type, color, isSource=false) {
   const m = new THREE.Mesh(SHARED.slotDiscGeom, mat);
   m.rotation.x = -Math.PI / 2;
   const pos = slotCenter(lv, r, c);
-  // Sit the ring slightly above the floor of the slot for visibility.
+  // Sit the disc slightly above the floor of the slot for visibility.
   const y = (lv === 0)
     ? PLATE_THICKNESS / 2 + 0.012
     : pos.y - MARBLE_RADIUS + 0.005;
@@ -435,6 +461,19 @@ function addSlotIndicator(lv, r, c, type, color, isSource=false) {
   m.userData = { type, lv, r, c, baseOpacity: mat.opacity, baseScale: 1 };
   slotGroup.add(m);
   actionSlots.set(m, m.userData);
+
+  // Larger invisible hit target stacked on top so finger taps near the
+  // slot still register, even if the visible disc is partially occluded.
+  const hitMat = new THREE.MeshBasicMaterial({
+    transparent: true, opacity: 0, depthWrite: false, depthTest: false,
+    side: THREE.DoubleSide,
+  });
+  const hit = new THREE.Mesh(SHARED.slotHitGeom, hitMat);
+  hit.rotation.x = -Math.PI / 2;
+  hit.position.set(pos.x, y + 0.002, pos.z);
+  hit.renderOrder = 999;
+  hit.userData = { type, lv, r, c, baseOpacity: 0, baseScale: 1, isHit: true };
+  slotGroup.add(hit);
 }
 
 // Exposed sync function

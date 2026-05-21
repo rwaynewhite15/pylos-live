@@ -196,7 +196,16 @@ input[type=text]:focus, select:focus { border-color: var(--primary); }
   overflow: hidden;
   border: 1px solid var(--line);
 }
-#board-canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+@media (max-width: 640px) {
+  #canvas-wrap { aspect-ratio: 4 / 5; }
+  #rotate-hint { font-size: .65rem; }
+}
+#board-canvas {
+  width: 100%; height: 100%; display: block;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
 
 #board-hint {
   position: absolute; top: 10px; left: 14px;
