@@ -2,9 +2,11 @@
 Pylos - Database layer (SQLite by default, Postgres if DATABASE_URL set).
 
 Tracks:
-  - leaderboard:  PvAI win/loss/tie counts per difficulty
-  - players:      PvP ELO rankings
-  - pvp_games:    history of PvP results
+  - pylos_leaderboard:  PvAI win/loss/tie counts per difficulty
+  - pylos_players:      PvP ELO rankings
+  - pylos_pvp_games:    history of PvP results
+
+Tables are prefixed `pylos_` so they can share a Postgres DB with other apps.
 """
 import os
 import sqlite3
@@ -32,7 +34,7 @@ def _init_db():
         cur = conn.cursor()
         if _USE_PG:
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS leaderboard (
+                CREATE TABLE IF NOT EXISTS pylos_leaderboard (
                     id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
                     difficulty TEXT NOT NULL,
@@ -43,7 +45,7 @@ def _init_db():
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS players (
+                CREATE TABLE IF NOT EXISTS pylos_players (
                     id SERIAL PRIMARY KEY,
                     name TEXT UNIQUE NOT NULL,
                     display_name TEXT NOT NULL,
@@ -55,7 +57,7 @@ def _init_db():
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS pvp_games (
+                CREATE TABLE IF NOT EXISTS pylos_pvp_games (
                     id SERIAL PRIMARY KEY,
                     p1_name TEXT NOT NULL,
                     p2_name TEXT NOT NULL,
@@ -75,7 +77,7 @@ def _init_db():
             """)
         else:
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS leaderboard (
+                CREATE TABLE IF NOT EXISTS pylos_leaderboard (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     difficulty TEXT NOT NULL,
@@ -86,7 +88,7 @@ def _init_db():
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS players (
+                CREATE TABLE IF NOT EXISTS pylos_players (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT UNIQUE NOT NULL,
                     display_name TEXT NOT NULL,
@@ -98,7 +100,7 @@ def _init_db():
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS pvp_games (
+                CREATE TABLE IF NOT EXISTS pylos_pvp_games (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     p1_name TEXT NOT NULL,
                     p2_name TEXT NOT NULL,
@@ -141,7 +143,7 @@ def _record_pvp_game(room):
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT name, elo FROM players WHERE name IN ({_PH},{_PH})",
+            f"SELECT name, elo FROM pylos_players WHERE name IN ({_PH},{_PH})",
             (p0_key, p1_key)
         )
         elo_map = {r[0]: r[1] for r in cur.fetchall()}
@@ -153,28 +155,28 @@ def _record_pvp_game(room):
         p1_w, p1_l, p1_t = (1,0,0) if winner==1 else ((0,1,0) if winner==0 else (0,0,1))
         if _USE_PG:
             upsert = (
-                f"INSERT INTO players (name,display_name,elo,wins,losses,ties,games_played) "
+                f"INSERT INTO pylos_players (name,display_name,elo,wins,losses,ties,games_played) "
                 f"VALUES ({_PH},{_PH},{_PH},{_PH},{_PH},{_PH},1) "
                 f"ON CONFLICT (name) DO UPDATE SET "
                 f"display_name=EXCLUDED.display_name,elo=EXCLUDED.elo,"
-                f"wins=players.wins+EXCLUDED.wins,losses=players.losses+EXCLUDED.losses,"
-                f"ties=players.ties+EXCLUDED.ties,games_played=players.games_played+1"
+                f"wins=pylos_players.wins+EXCLUDED.wins,losses=pylos_players.losses+EXCLUDED.losses,"
+                f"ties=pylos_players.ties+EXCLUDED.ties,games_played=pylos_players.games_played+1"
             )
             cur.execute(upsert, (p0_key, p0["name"], new_ra, p0_w, p0_l, p0_t))
             cur.execute(upsert, (p1_key, p1["name"], new_rb, p1_w, p1_l, p1_t))
         else:
             upsert = (
-                "INSERT INTO players (name,display_name,elo,wins,losses,ties,games_played) "
+                "INSERT INTO pylos_players (name,display_name,elo,wins,losses,ties,games_played) "
                 "VALUES (?,?,?,?,?,?,1) "
                 "ON CONFLICT(name) DO UPDATE SET "
                 "display_name=excluded.display_name,elo=excluded.elo,"
-                "wins=players.wins+excluded.wins,losses=players.losses+excluded.losses,"
-                "ties=players.ties+excluded.ties,games_played=players.games_played+1"
+                "wins=pylos_players.wins+excluded.wins,losses=pylos_players.losses+excluded.losses,"
+                "ties=pylos_players.ties+excluded.ties,games_played=pylos_players.games_played+1"
             )
             cur.execute(upsert, (p0_key, p0["name"], new_ra, p0_w, p0_l, p0_t))
             cur.execute(upsert, (p1_key, p1["name"], new_rb, p1_w, p1_l, p1_t))
         cur.execute(
-            f"INSERT INTO pvp_games "
+            f"INSERT INTO pylos_pvp_games "
             f"(p1_name,p2_name,p1_display,p2_display,p1_reserve,p2_reserve,winner_name,"
             f"p1_elo_before,p2_elo_before,p1_elo_after,p2_elo_after,p1_elo_change,p2_elo_change) "
             f"VALUES ({','.join([_PH]*13)})",

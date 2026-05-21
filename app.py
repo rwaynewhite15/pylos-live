@@ -140,13 +140,13 @@ def leaderboard():
         cur = conn.cursor()
         if difficulty in ("easy", "medium", "hard"):
             cur.execute(
-                f"SELECT name, difficulty, wins, losses, ties FROM leaderboard "
+                f"SELECT name, difficulty, wins, losses, ties FROM pylos_leaderboard "
                 f"WHERE difficulty = {_PH} ORDER BY wins DESC, losses ASC, ties DESC LIMIT 20",
                 (difficulty,)
             )
         else:
             cur.execute(
-                "SELECT name, difficulty, wins, losses, ties FROM leaderboard "
+                "SELECT name, difficulty, wins, losses, ties FROM pylos_leaderboard "
                 "ORDER BY wins DESC, losses ASC, ties DESC LIMIT 20"
             )
         rows = cur.fetchall()
@@ -178,7 +178,7 @@ def submit_score():
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO leaderboard (name, difficulty, wins, losses, ties) "
+            f"INSERT INTO pylos_leaderboard (name, difficulty, wins, losses, ties) "
             f"VALUES ({_PH}, {_PH}, {_PH}, {_PH}, {_PH})",
             (name, difficulty, wins, losses, ties)
         )
@@ -196,7 +196,7 @@ def pvp_rankings():
         cur = conn.cursor()
         cur.execute(
             "SELECT display_name, elo, wins, losses, ties, games_played "
-            "FROM players ORDER BY elo DESC LIMIT 20"
+            "FROM pylos_players ORDER BY elo DESC LIMIT 20"
         )
         rows = cur.fetchall()
         conn.close()
@@ -216,7 +216,7 @@ def pvp_history():
         cur.execute(
             "SELECT p1_display, p2_display, p1_reserve, p2_reserve, winner_name, "
             "p1_elo_change, p2_elo_change, p1_elo_after, p2_elo_after, played_at "
-            "FROM pvp_games ORDER BY played_at DESC LIMIT 50"
+            "FROM pylos_pvp_games ORDER BY played_at DESC LIMIT 50"
         )
         rows = cur.fetchall()
         conn.close()
@@ -236,7 +236,7 @@ def pvp_player(name):
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT display_name, elo, wins, losses, ties, games_played FROM players WHERE name = {_PH}",
+            f"SELECT display_name, elo, wins, losses, ties, games_played FROM pylos_players WHERE name = {_PH}",
             (key,)
         )
         player = cur.fetchone()
@@ -245,7 +245,7 @@ def pvp_player(name):
         cur.execute(
             f"SELECT p1_display, p2_display, p1_reserve, p2_reserve, winner_name, "
             f"p1_elo_change, p2_elo_change, p1_elo_after, p2_elo_after, played_at "
-            f"FROM pvp_games WHERE p1_name = {_PH} OR p2_name = {_PH} "
+            f"FROM pylos_pvp_games WHERE p1_name = {_PH} OR p2_name = {_PH} "
             f"ORDER BY played_at DESC LIMIT 20",
             (key, key)
         )

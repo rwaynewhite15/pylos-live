@@ -1,6 +1,7 @@
-# Render blueprint - deploys a free web service + free Postgres database.
-# Push to GitHub, then go to https://dashboard.render.com/blueprints and
-# point at this repo. Render reads this file and provisions everything.
+# Render blueprint - free web service only.
+# Reuses an existing free Postgres database (set DATABASE_URL manually in the
+# Render dashboard after the service is created — see README/deploy notes).
+# Tables are namespaced `pylos_*` so they coexist with other apps in the DB.
 
 services:
   - type: web
@@ -15,15 +16,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.10
       - key: SECRET_KEY
-        generateValue: true       # Render generates a random secret on first deploy
-      - key: DATABASE_URL
-        fromDatabase:
-          name: pylos-db
-          property: connectionString
-
-databases:
-  - name: pylos-db
-    plan: free                    # Free Postgres expires after 90 days
-    region: oregon
-    databaseName: pylos
-    user: pylos
+        generateValue: true
+      # DATABASE_URL is intentionally NOT set here. Add it manually in the
+      # service's Environment tab using the connection string from your
+      # existing Render Postgres database (use the *Internal* URL).
