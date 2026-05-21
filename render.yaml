@@ -1,0 +1,29 @@
+# Render blueprint - deploys a free web service + free Postgres database.
+# Push to GitHub, then go to https://dashboard.render.com/blueprints and
+# point at this repo. Render reads this file and provisions everything.
+
+services:
+  - type: web
+    name: pylos-live
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.10
+      - key: SECRET_KEY
+        generateValue: true       # Render generates a random secret on first deploy
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pylos-db
+          property: connectionString
+
+databases:
+  - name: pylos-db
+    plan: free                    # Free Postgres expires after 90 days
+    region: oregon
+    databaseName: pylos
+    user: pylos
