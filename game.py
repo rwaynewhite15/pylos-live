@@ -125,14 +125,15 @@ class PylosGame:
         return False
 
     def completes_own_line(self, lv, r, c, player):
-        """True if (lv,r,c) was just filled by `player` and the placement
-        completed a full row or column of 4 own marbles. Only possible on
-        level 0 (the only level wide enough for a 4-in-a-row)."""
-        if lv != 0:
+        """True if (lv,r,c) completed a full row or column of own marbles.
+        Triggers on level 0 (row/column of 4) and level 1 (row/column of 3).
+        Levels 2 and above are covered by the 2x2 square check."""
+        if lv > 1:
             return False
-        if all(self.board[0][r][cc] == player for cc in range(NUM_LEVELS)):
+        s = level_size(lv)
+        if all(self.board[lv][r][cc] == player for cc in range(s)):
             return True
-        if all(self.board[0][rr][c] == player for rr in range(NUM_LEVELS)):
+        if all(self.board[lv][rr][c] == player for rr in range(s)):
             return True
         return False
 
