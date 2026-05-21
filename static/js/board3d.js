@@ -27,16 +27,16 @@ let lastHoverWasMarble = false;
 
 const SHARED = {
   marbleGeom: null,
-  slotRingGeom: null,
+  slotDiscGeom: null,
 };
 
 function ensureGeoms() {
   if (!SHARED.marbleGeom) {
     SHARED.marbleGeom = new THREE.SphereGeometry(MARBLE_RADIUS, 32, 24);
   }
-  if (!SHARED.slotRingGeom) {
-    SHARED.slotRingGeom = new THREE.RingGeometry(
-      MARBLE_RADIUS * 0.45, MARBLE_RADIUS * 0.75, 32);
+  if (!SHARED.slotDiscGeom) {
+    // Filled disc so the entire slot is clickable, not just the rim.
+    SHARED.slotDiscGeom = new THREE.CircleGeometry(MARBLE_RADIUS * 0.85, 36);
   }
 }
 
@@ -421,10 +421,10 @@ function rebuildSlots() {
 
 function addSlotIndicator(lv, r, c, type, color, isSource=false) {
   const mat = new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: isSource ? 0.85 : 0.55,
+    color, transparent: true, opacity: isSource ? 0.55 : 0.32,
     side: THREE.DoubleSide, depthWrite: false,
   });
-  const m = new THREE.Mesh(SHARED.slotRingGeom, mat);
+  const m = new THREE.Mesh(SHARED.slotDiscGeom, mat);
   m.rotation.x = -Math.PI / 2;
   const pos = slotCenter(lv, r, c);
   // Sit the ring slightly above the floor of the slot for visibility.
