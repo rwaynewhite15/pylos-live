@@ -3,10 +3,9 @@ Pylos - AI logic.
 
 Heuristic + alpha-beta minimax search over a compact action model that
 collapses (place|lift) and (optional retrievals) into a single super-move
-per turn. The branching factor is large near the start but shrinks fast.
+per turn.
 """
 import random
-import itertools
 
 from game import NUM_LEVELS, level_size
 
@@ -14,30 +13,52 @@ from game import NUM_LEVELS, level_size
 def _heuristic(game, ai_player):
     opp = 1 - ai_player
     score = 0
-    # Reserve advantage (each saved marble is worth ~1 unit).
-    score += (game.reserve[ai_player] - game.reserve[opp]) * 1.0
-    # Marbles on higher levels are valuable.
+
+    # Reserve advantage — each saved marble is worth more now that we look deeper.
+    score += (game.reserve[ai_player] - game.reserve[opp]) * 1.5
+
+    # Positional value — exponentially more valuable at higher levels.
     for lv in range(NUM_LEVELS):
         s = level_size(lv)
+        weight = 1.0 + lv * 2.0
         for r in range(s):
             for c in range(s):
                 v = game.board[lv][r][c]
                 if v is None:
                     continue
-                weight = 0.4 + lv * 0.7
                 if v == ai_player:
                     score += weight
                 else:
                     score -= weight
+
+    # Formation analysis: 2×2 squares that support placement on the level above.
+    # Complete formations and near-complete unblocked ones are heavily rewarded.
+    for lv in range(NUM_LEVELS - 1):
+        s = level_size(lv)
+        fw = 2.0 * (lv + 1)   # scales with level: 2, 4, 6
+        for r in range(s - 1):
+            for c in range(s - 1):
+                cells = [game.board[lv][r + dr][c + dc]
+                         for dr in range(2) for dc in range(2)]
+                ai_cnt = sum(1 for v in cells if v == ai_player)
+                opp_cnt = sum(1 for v in cells if v == opp)
+                if ai_cnt == 4:
+                    score += fw * 2.0
+                elif opp_cnt == 4:
+                    score -= fw * 2.0
+                elif ai_cnt == 3 and opp_cnt == 0:
+                    score += fw
+                elif opp_cnt == 3 and ai_cnt == 0:
+                    score -= fw
+
     return score
 
 
 def _enumerate_super_moves(game):
     """Return list of (action_sequence, resulting_game) for current player.
 
-    Retrieval branching is pruned aggressively: when a bonus opens, the AI
-    only considers (a) take the two lowest-level non-supporting marbles, and
-    (b) skip. This keeps the branching factor manageable at depth 2-3.
+    Retrieval branching is pruned: when a bonus opens, the AI considers
+    (a) take the two lowest-level non-supporting marbles, and (b) skip.
     """
     base_moves = game.valid_moves()
     result = []
@@ -58,7 +79,7 @@ def _enumerate_super_moves(game):
             g_skip = g2.copy()
             g_skip.skip_retrieve(player)
             result.append(([mv, {"type": "skip"}], g_skip))
-            # Option B: take two lowest-level non-supporting (or just one if only one available)
+            # Option B: take two lowest-level non-supporting (or just one if only one)
             if liftable:
                 pos = liftable[0]
                 g1 = g2.copy()
@@ -86,6 +107,11 @@ def _enumerate_super_moves(game):
     return result
 
 
+# Max moves considered at each internal minimax node.
+# Ordering ensures we keep the best-looking moves, so pruning is aggressive.
+_INTERNAL_CAP = 25
+
+
 def _minimax(game, depth, alpha, beta, ai_player):
     if game.game_over:
         if game.winner == ai_player:
@@ -101,6 +127,12 @@ def _minimax(game, depth, alpha, beta, ai_player):
         return _heuristic(game, ai_player)
 
     maximizing = (game.current_player == ai_player)
+    # Sort so the most promising moves come first — this is what makes alpha-beta
+    # prune aggressively instead of wandering through bad branches.
+    supers.sort(key=lambda tup: _heuristic(tup[1], ai_player), reverse=maximizing)
+    if len(supers) > _INTERNAL_CAP:
+        supers = supers[:_INTERNAL_CAP]
+
     best = float("-inf") if maximizing else float("inf")
     for _seq, g2 in supers:
         val = _minimax(g2, depth - 1, alpha, beta, ai_player)
@@ -119,11 +151,9 @@ def _minimax(game, depth, alpha, beta, ai_player):
     return best
 
 
-def _limit_supers(supers, cap):
-    """Trim a super-move list to a manageable size by sampling."""
-    if len(supers) <= cap:
-        return supers
-    random.shuffle(supers)
+def _order_supers(supers, ai_player, cap):
+    """Sort by heuristic score (best for ai_player first) and keep top `cap`."""
+    supers.sort(key=lambda tup: _heuristic(tup[1], ai_player), reverse=True)
     return supers[:cap]
 
 
@@ -137,11 +167,11 @@ def get_ai_super_move(game, difficulty):
         seq, _ = random.choice(supers)
         return seq
 
-    depth = 2 if difficulty == "medium" else 3
-    cap = 60 if difficulty == "medium" else 120
-    supers = _limit_supers(supers, cap)
-
     ai_player = game.current_player
+    depth = 2 if difficulty == "medium" else 4
+    cap = 60 if difficulty == "medium" else 120
+    supers = _order_supers(supers, ai_player, cap)
+
     best_score = float("-inf")
     best_seq = supers[0][0]
     for seq, g2 in supers:
