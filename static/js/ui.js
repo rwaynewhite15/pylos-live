@@ -104,8 +104,21 @@ function showGameOver() {
   } else {
     title.textContent = "You lose";
   }
+  // Describe how the game ended.
+  const apex = g.last_move && g.last_move.to && g.last_move.to[0] === 3;
+  const winnerIsMe = g.winner === state.yourPlayer;
+  let reason = "";
+  if (g.winner !== null) {
+    if (apex) {
+      reason = winnerIsMe ? "You Completed the Pyramid"
+                          : "Your Opponent Completed the Pyramid";
+    } else {
+      reason = winnerIsMe ? "Your Opponent Ran Out of Moves"
+                          : "You Ran Out of Moves";
+    }
+  }
   scores.innerHTML = `
-    <div>Reserve — you: <b>${g.reserve[state.yourPlayer]}</b>, opp: <b>${g.reserve[1 - state.yourPlayer]}</b></div>
+    <div>${reason}</div>
     <div style="margin-top:6px">Series — you: <b>${state.myScore}</b>, opp: <b>${state.oppScore}</b> (${state.gamesPlayed} games)</div>
   `;
   const post = document.getElementById('post-lb-btn');
