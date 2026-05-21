@@ -26,11 +26,34 @@ def _heuristic(game, ai_player):
     board = game.board
     score = 0.0
 
-    # Reserve advantage — every saved marble is a future move.
+    # ── Apex threat: huge weight, dominates other terms. ────────────────────
+    # If level 2 (the 2x2 supporting apex) is fully filled and the next
+    # player has any way to place or lift onto the apex, the game is
+    # effectively decided. Detect that here so the search sees it at the
+    # leaves without needing extra plies.
+    if board[3][0][0] is None:
+        lvl2 = board[2]
+        lvl2_full = (lvl2[0][0] is not None and lvl2[0][1] is not None
+                     and lvl2[1][0] is not None and lvl2[1][1] is not None)
+        if lvl2_full:
+            nxt = game.current_player
+            # Can `nxt` reach the apex on their next move?
+            #   Direct placement: needs reserve.
+            #   Lift: any own marble on lvl 0/1 that is not supporting anything.
+            #         (Level 2 marbles are all supporting the apex slot itself.)
+            can_apex = game.reserve[nxt] > 0
+            if not can_apex:
+                for (lv, r, c) in game.liftable_marbles(nxt):
+                    if lv < 2:
+                        can_apex = True
+                        break
+            if can_apex:
+                score += 500.0 if nxt == ai_player else -500.0
+
+    # ── Reserve advantage. Each saved marble = future placement. ────────────
     score += (game.reserve[ai_player] - game.reserve[opp]) * 3.0
 
-    # Per-marble positional value, downweighted if the marble is "wasted"
-    # (i.e. stuck supporting an opponent marble above).
+    # ── Per-marble positional value, devalued if "wasted" (supports opp). ──
     for lv in range(NUM_LEVELS):
         s = level_size(lv)
         for r in range(s):
@@ -51,16 +74,18 @@ def _heuristic(game, ai_player):
                         if supports_opp:
                             break
                     if supports_opp:
-                        w *= 0.35
+                        w *= 0.30
                 if v == ai_player:
                     score += w
                 else:
                     score -= w
 
-    # 2x2 formation analysis at every supporting level.
+    # ── 2x2 formation pressure. Threats now scaled higher — the reserve
+    # race is the whole game and a 3-unblocked square is a free +2 marbles
+    # next move. Weight rises with level since higher squares matter more.
     for lv in range(NUM_LEVELS - 1):
         s = level_size(lv)
-        threat_w = 2.0 + lv * 2.5
+        threat_w = 3.0 + lv * 3.5
         for r in range(s - 1):
             for c in range(s - 1):
                 cells = (board[lv][r][c], board[lv][r + 1][c],
@@ -72,15 +97,15 @@ def _heuristic(game, ai_player):
                 elif opp_cnt == 4:
                     score -= threat_w * 3.0
                 elif ai_cnt == 3 and opp_cnt == 0:
-                    score += threat_w * 1.6
+                    score += threat_w * 2.0
                 elif opp_cnt == 3 and ai_cnt == 0:
-                    score -= threat_w * 1.6
+                    score -= threat_w * 2.0
                 elif ai_cnt == 2 and opp_cnt == 0:
-                    score += threat_w * 0.5
+                    score += threat_w * 0.6
                 elif opp_cnt == 2 and ai_cnt == 0:
-                    score -= threat_w * 0.5
+                    score -= threat_w * 0.6
 
-    # Mobility — non-pinned own marbles give lift flexibility.
+    # ── Mobility — non-pinned own marbles give lift flexibility. ────────────
     ai_lifts = len(game.liftable_marbles(ai_player))
     opp_lifts = len(game.liftable_marbles(opp))
     score += (ai_lifts - opp_lifts) * 0.5
@@ -255,9 +280,9 @@ def get_ai_super_move(game, difficulty):
         cap = 60
         time_limit = 0.8
     else:  # hard
-        max_depth = 7        # iterative deepening will rarely reach this
-        cap = 140
-        time_limit = 2.5
+        max_depth = 8        # iterative deepening will rarely reach this
+        cap = 180
+        time_limit = 4.0
 
     supers = _order_supers(supers, ai_player, cap)
     if len(supers) == 1:
