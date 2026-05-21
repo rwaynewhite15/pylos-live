@@ -10,9 +10,11 @@ Turn flow:
        - LIFT one of their marbles to a higher level (slot must be empty
          and fully-supported once the source is removed; lifted marble must
          not be supporting anything above it).
-  2) If the move triggered a bonus (placed on level >= 2, OR a 2x2
-     square of the player's OWN marbles was just formed), the player MAY
-     retrieve 1 or 2 of their own non-supporting marbles back to reserve.
+  2) If the move completed a FORMATION of the player's own marbles, the
+     player MAY retrieve 1 or 2 of their own non-supporting marbles back
+     to reserve. A formation is either:
+       - a 2x2 SQUARE of own marbles (on any level), OR
+       - a ROW or COLUMN of 4 own marbles (only possible on level 0).
   3) Otherwise pass the turn.
 
 WIN: place/lift the apex marble (level 4).
@@ -109,21 +111,35 @@ class PylosGame:
 
     def completes_own_square(self, lv, r, c, player):
         """True if placing/lifting at (lv,r,c) for `player` just created a
-        2x2 supporting square of that player's marbles directly under an
-        upper slot."""
+        2x2 square of that player's marbles on level `lv`."""
         if lv >= NUM_LEVELS - 1:
             return False
         b = self.board[lv]
         s = level_size(lv + 1)
         for r2 in range(max(0, r - 1), min(s, r + 1)):
             for c2 in range(max(0, c - 1), min(s, c + 1)):
-                # The 2x2 below (lv+1,r2,c2) is (lv,r2,c2),(lv,r2+1,c2),
-                # (lv,r2,c2+1),(lv,r2+1,c2+1). Check all are this player.
                 cells = [b[r2][c2], b[r2 + 1][c2],
                          b[r2][c2 + 1], b[r2 + 1][c2 + 1]]
                 if all(x == player for x in cells):
                     return True
         return False
+
+    def completes_own_line(self, lv, r, c, player):
+        """True if (lv,r,c) was just filled by `player` and the placement
+        completed a full row or column of 4 own marbles. Only possible on
+        level 0 (the only level wide enough for a 4-in-a-row)."""
+        if lv != 0:
+            return False
+        if all(self.board[0][r][cc] == player for cc in range(NUM_LEVELS)):
+            return True
+        if all(self.board[0][rr][c] == player for rr in range(NUM_LEVELS)):
+            return True
+        return False
+
+    def completes_own_formation(self, lv, r, c, player):
+        """Either a 2x2 square or a 4-in-a-row of the player's marbles."""
+        return (self.completes_own_square(lv, r, c, player)
+                or self.completes_own_line(lv, r, c, player))
 
     # ── Move helpers ────────────────────────────────────────────────────
 
@@ -193,7 +209,7 @@ class PylosGame:
             self._finish(player)
             return True, "OK"
 
-        bonus = (lv >= 1) or self.completes_own_square(lv, r, c, player)
+        bonus = self.completes_own_formation(lv, r, c, player)
         if bonus and self.liftable_marbles(player):
             self.retrieve_open = True
             self.retrievals_taken = []
@@ -233,12 +249,9 @@ class PylosGame:
             self._finish(player)
             return True, "OK"
 
-        # Lifting always grants the bonus (always goes higher).
-        bonus = True
-        # Also a square may have been formed at the from-level neighborhood
-        # by lifting -- no, lifting removes a marble, can't form a square.
-        # But moving up may form a square at the target level:
-        bonus = bonus or self.completes_own_square(tl, tr, tc, player)
+        # Lifting grants a bonus only if it completed a formation at the
+        # target level (square; row/column-of-4 is impossible above level 0).
+        bonus = self.completes_own_formation(tl, tr, tc, player)
 
         if bonus and self.liftable_marbles(player):
             self.retrieve_open = True

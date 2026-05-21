@@ -19,7 +19,9 @@ function selectMode(m) {
   document.getElementById('difficulty-row').classList.toggle('hidden', m !== 'ai');
   document.getElementById('first-move-opp').textContent =
     (m === 'ai') ? 'AI goes first' : 'Opponent goes first';
+  // Only show the relevant leaderboard card for the selected mode.
   document.getElementById('leaderboard-card').classList.toggle('hidden', m !== 'ai');
+  document.getElementById('pvp-card').classList.toggle('hidden', m === 'ai');
 }
 
 function showError(msg) {
