@@ -114,9 +114,13 @@ def _ai_task(room_id, token):
                 "elapsed": elapsed,
                 "budget": budget,
             }, to=room_id)
+            # Cooperative yield — the minimax search is pure CPU and never
+            # gives the gevent loop a chance to actually flush the emit.
+            socketio.sleep(0)
 
         def candidates(snapshot):
             socketio.emit("ai_candidates", {"candidates": snapshot}, to=room_id)
+            socketio.sleep(0)
 
         seq = get_ai_super_move(game, room["difficulty"],
                                 progress_cb=progress, candidates_cb=candidates)
