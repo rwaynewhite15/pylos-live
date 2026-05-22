@@ -30,6 +30,13 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pylos-dev-secret")
 socketio = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
 
+# Admin password — overridable via env var in deployed environments.
+ADMIN_PASSWORD = os.environ.get("PYLOS_ADMIN_PASSWORD", "pylos")
+
+
+def _is_admin(data):
+    return str((data or {}).get("password", "")) == ADMIN_PASSWORD
+
 rooms = {}        # room_id -> room dict
 sid_to_room = {}  # sid -> room_id
 
@@ -197,38 +204,71 @@ def submit_score():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/admin/check", methods=["POST"])
+def admin_check():
+    """Verify the admin password — UI uses this to gate the admin toggle."""
+    data = request.get_json(force=True) or {}
+    if _is_admin(data):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Bad password"}), 403
+
+
 @app.route("/leaderboard/delete", methods=["POST"])
 def leaderboard_delete():
-    """Delete a leaderboard entry by id. The provided `name` must match
-    the row's name (case-insensitive) so users can only remove their own."""
+    """Delete a leaderboard entry by id. Admin password required."""
     data = request.get_json(force=True) or {}
+    if not _is_admin(data):
+        return jsonify({"error": "Admin password required"}), 403
     try:
         entry_id = int(data.get("id", 0))
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid id"}), 400
-    name = str(data.get("name", "")).strip().lower()
+    if not entry_id:
+        return jsonify({"error": "Missing id"}), 400
+    try:
+        conn = _db_conn()
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM pylos_leaderboard WHERE id = {_PH}", (entry_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/leaderboard/edit", methods=["POST"])
+def leaderboard_edit():
+    """Edit a leaderboard entry's name/difficulty/wins/losses. Admin only."""
+    data = request.get_json(force=True) or {}
+    if not _is_admin(data):
+        return jsonify({"error": "Admin password required"}), 403
+    try:
+        entry_id = int(data.get("id", 0))
+        wins = int(data.get("wins", 0))
+        losses = int(data.get("losses", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid numeric field"}), 400
+    name = str(data.get("name", "")).strip()[:20]
+    difficulty = str(data.get("difficulty", "")).strip().lower()
     if not entry_id or not name:
         return jsonify({"error": "Missing id or name"}), 400
+    if difficulty not in ("easy", "medium", "hard"):
+        return jsonify({"error": "Invalid difficulty"}), 400
+    if wins < 0 or losses < 0:
+        return jsonify({"error": "Wins/losses must be >= 0"}), 400
     try:
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT name FROM pylos_leaderboard WHERE id = {_PH}",
-            (entry_id,)
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({"error": "Entry not found"}), 404
-        if row[0].strip().lower() != name:
-            conn.close()
-            return jsonify({"error": "Name does not match this entry"}), 403
-        cur.execute(
-            f"DELETE FROM pylos_leaderboard WHERE id = {_PH}",
-            (entry_id,)
+            f"UPDATE pylos_leaderboard SET name = {_PH}, difficulty = {_PH}, "
+            f"wins = {_PH}, losses = {_PH} WHERE id = {_PH}",
+            (name, difficulty, wins, losses, entry_id)
         )
         conn.commit()
+        affected = cur.rowcount
         conn.close()
+        if affected == 0:
+            return jsonify({"error": "Entry not found"}), 404
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -311,15 +351,13 @@ def pvp_player(name):
 
 @app.route("/pvp/player/delete", methods=["POST"])
 def pvp_player_delete():
-    """Remove a PvP player entry and their game history. Only the player
-    themselves can do it — requester's name must match (case-insensitive)."""
+    """Remove a PvP player + their game history. Admin only."""
     data = request.get_json(force=True) or {}
+    if not _is_admin(data):
+        return jsonify({"error": "Admin password required"}), 403
     name = str(data.get("name", "")).strip()
-    requester = str(data.get("requester", "")).strip()
-    if not name or not requester:
+    if not name:
         return jsonify({"error": "Missing name"}), 400
-    if name.lower() != requester.lower():
-        return jsonify({"error": "Only the player can remove their own ranking"}), 403
     key = name.lower()
     try:
         conn = _db_conn()
@@ -331,6 +369,50 @@ def pvp_player_delete():
         cur.execute(f"DELETE FROM pylos_players WHERE name = {_PH}", (key,))
         conn.commit()
         conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/pvp/player/edit", methods=["POST"])
+def pvp_player_edit():
+    """Edit a PvP player's display_name / elo / wins / losses. Admin only.
+
+    The `name` field is the lookup key (lower-cased existing name);
+    new_display_name updates the displayed form.
+    """
+    data = request.get_json(force=True) or {}
+    if not _is_admin(data):
+        return jsonify({"error": "Admin password required"}), 403
+    name = str(data.get("name", "")).strip()
+    new_display = str(data.get("new_display_name", "")).strip()[:20]
+    try:
+        elo = int(data.get("elo", 1000))
+        wins = int(data.get("wins", 0))
+        losses = int(data.get("losses", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid numeric field"}), 400
+    if not name or not new_display:
+        return jsonify({"error": "Missing name(s)"}), 400
+    if wins < 0 or losses < 0:
+        return jsonify({"error": "Wins/losses must be >= 0"}), 400
+    key = name.lower()
+    new_key = new_display.lower()
+    try:
+        conn = _db_conn()
+        cur = conn.cursor()
+        games_played = wins + losses
+        cur.execute(
+            f"UPDATE pylos_players SET name = {_PH}, display_name = {_PH}, "
+            f"elo = {_PH}, wins = {_PH}, losses = {_PH}, games_played = {_PH} "
+            f"WHERE name = {_PH}",
+            (new_key, new_display, elo, wins, losses, games_played, key)
+        )
+        affected = cur.rowcount
+        conn.commit()
+        conn.close()
+        if affected == 0:
+            return jsonify({"error": "Player not found"}), 404
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

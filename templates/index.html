@@ -71,8 +71,11 @@
     </div>
 
     <div class="card hidden" id="leaderboard-card" style="margin-top:0">
-      <h2>PvAI Leaderboard</h2>
-      <div class="toggle" id="lb-filter" style="margin-bottom:14px">
+      <div class="card-header-row">
+        <h2 style="margin:0">PvAI Leaderboard</h2>
+        <button class="admin-toggle" onclick="toggleAdminMode()">🔒 Admin</button>
+      </div>
+      <div class="toggle" id="lb-filter" style="margin:12px 0 14px">
         <button class="toggle-btn active" onclick="filterLeaderboard('all')">All</button>
         <button class="toggle-btn" onclick="filterLeaderboard('easy')">Easy</button>
         <button class="toggle-btn" onclick="filterLeaderboard('medium')">Medium</button>
@@ -84,7 +87,10 @@
     </div>
 
     <div class="card" id="pvp-card">
-      <h2>PvP Rankings</h2>
+      <div class="card-header-row">
+        <h2 style="margin:0">PvP Rankings</h2>
+        <button class="admin-toggle" onclick="toggleAdminMode()">🔒 Admin</button>
+      </div>
       <div class="toggle" id="pvp-tab-bar" style="margin-bottom:14px">
         <button class="toggle-btn active" onclick="pvpTab('rankings')">Rankings</button>
         <button class="toggle-btn" onclick="pvpTab('history')">History</button>

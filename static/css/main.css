@@ -331,15 +331,43 @@ table.lb td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .pos-elo { color: #6ce06c; }
 .neg-elo { color: var(--danger); }
 
-.lb-del {
+.card-header-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; margin-bottom: 10px;
+}
+.admin-toggle {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.admin-toggle:hover { color: var(--fg); border-color: var(--primary); }
+.admin-toggle.admin-active {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(255,209,102,.08);
+}
+.admin-cell { white-space: nowrap; text-align: right; }
+.lb-del, .lb-edit {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 6px;
   width: 22px; height: 22px; line-height: 1;
-  font-size: .95rem;
+  font-size: .9rem;
   cursor: pointer;
   padding: 0;
+  margin-left: 4px;
+}
+.lb-edit:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
 }
 .lb-del:hover {
   background: var(--danger);
