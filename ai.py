@@ -6,11 +6,31 @@ Each iteration's best move is used to order the next iteration, so deeper
 plies prune aggressively. A position-aware heuristic punishes own marbles
 that are stuck supporting opponent stones, rewards completed and near-
 complete formations, and weights higher levels exponentially.
+
+A transposition table memoizes (position) -> (depth, score, flag) so
+positions reached via different move orders are not researched. When the
+combined reserves drop low, the AI enters "endgame mode" and is given a
+much larger time + depth budget — at that point the tree is small enough
+that TT-augmented search approximates a strong solution.
 """
 import random
 import time
 
 from game import NUM_LEVELS, level_size
+
+
+# Transposition table flag values.
+_TT_EXACT = 0
+_TT_LOWER = 1
+_TT_UPPER = 2
+
+
+def _state_key(game):
+    """Canonical hashable key for a Pylos position."""
+    board = tuple(tuple(tuple(row) for row in lvl) for lvl in game.board)
+    return (board, game.reserve[0], game.reserve[1],
+            game.current_player, game.retrieve_open,
+            tuple(sorted(game.retrievals_taken)))
 
 
 # Positional value per level (exponential — apex matters most).
@@ -218,7 +238,7 @@ class _Timeout(Exception):
     pass
 
 
-def _minimax(game, depth, alpha, beta, ai_player, deadline):
+def _minimax(game, depth, alpha, beta, ai_player, deadline, tt):
     if deadline is not None and time.monotonic() > deadline:
         raise _Timeout
     if game.game_over:
@@ -227,12 +247,35 @@ def _minimax(game, depth, alpha, beta, ai_player, deadline):
         if game.winner is None:
             return 0.0
         return -10000.0
+
+    # Transposition table probe.
+    alpha_orig = alpha
+    key = _state_key(game) if tt is not None else None
+    if key is not None:
+        entry = tt.get(key)
+        if entry is not None and entry[0] >= depth:
+            _d, val, flag = entry
+            if flag == _TT_EXACT:
+                return val
+            if flag == _TT_LOWER and val > alpha:
+                alpha = val
+            elif flag == _TT_UPPER and val < beta:
+                beta = val
+            if alpha >= beta:
+                return val
+
     if depth == 0:
-        return _heuristic(game, ai_player)
+        h = _heuristic(game, ai_player)
+        if key is not None:
+            tt[key] = (0, h, _TT_EXACT)
+        return h
 
     supers = _enumerate_super_moves(game)
     if not supers:
-        return _heuristic(game, ai_player)
+        h = _heuristic(game, ai_player)
+        if key is not None:
+            tt[key] = (depth, h, _TT_EXACT)
+        return h
 
     maximizing = (game.current_player == ai_player)
     # Order children by static eval so cutoffs trigger early.
@@ -242,7 +285,7 @@ def _minimax(game, depth, alpha, beta, ai_player, deadline):
 
     best = float("-inf") if maximizing else float("inf")
     for _seq, g2 in supers:
-        val = _minimax(g2, depth - 1, alpha, beta, ai_player, deadline)
+        val = _minimax(g2, depth - 1, alpha, beta, ai_player, deadline, tt)
         if maximizing:
             if val > best:
                 best = val
@@ -255,6 +298,19 @@ def _minimax(game, depth, alpha, beta, ai_player, deadline):
                 beta = best
         if beta <= alpha:
             break
+
+    # Store result with appropriate flag.
+    if key is not None:
+        if best <= alpha_orig:
+            flag = _TT_UPPER
+        elif best >= beta:
+            flag = _TT_LOWER
+        else:
+            flag = _TT_EXACT
+        # Bound table size to avoid runaway memory.
+        if len(tt) < 800_000:
+            tt[key] = (depth, best, flag)
+
     return best
 
 
@@ -271,6 +327,9 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit):
     ordering = list(range(len(root_supers)))
     best_seq = root_supers[ordering[0]][0]
     depth_done = 0
+    # Transposition table persists across all iterations of this call —
+    # deeper iterations massively reuse work from shallower ones.
+    tt = {}
 
     for d in range(1, max_depth + 1):
         # If we've already used 60% of the budget, don't start a new (more
@@ -288,7 +347,7 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit):
                 seq, g2 = root_supers[idx]
                 # After our move it's opponent's turn — minimizing side.
                 score = _minimax(g2, d - 1, alpha, float("inf"),
-                                 ai_player, deadline)
+                                 ai_player, deadline, tt)
                 iter_scores.append((idx, score))
                 if score > iter_best_score:
                     iter_best_score = score
@@ -324,9 +383,23 @@ def get_ai_super_move(game, difficulty):
         cap = 60
         time_limit = 0.8
     else:  # hard
-        max_depth = 10       # iterative deepening will rarely reach this
-        cap = 220
-        time_limit = 6.0
+        combined_reserve = game.reserve[0] + game.reserve[1]
+        if combined_reserve <= 10:
+            # Endgame: branching factor is small, TT hits dense.
+            # Crank the budget — this is where the AI should be perfect.
+            max_depth = 30
+            cap = 260
+            time_limit = 18.0
+        elif combined_reserve <= 18:
+            # Midgame: deeper than opening, narrower tree than full game.
+            max_depth = 14
+            cap = 240
+            time_limit = 9.0
+        else:
+            # Opening: branching factor is huge, deep search wastes time.
+            max_depth = 10
+            cap = 220
+            time_limit = 6.0
 
     supers = _order_supers(supers, ai_player, cap)
     if len(supers) == 1:
