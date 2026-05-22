@@ -13,7 +13,7 @@ const RETRIEVE_COLOR     = 0xffd166;
 const SOURCE_COLOR       = 0xff5d6c;
 
 let renderer, scene, camera, controls;
-let baseGroup, marbleGroup, slotGroup;
+let baseGroup, marbleGroup, slotGroup, candidateGroup;
 let raycaster, pointer;
 let canvas, canvasWrap;
 let resizeObserver;
@@ -99,6 +99,9 @@ function init3D() {
   scene.add(marbleGroup);
   slotGroup = new THREE.Group();
   scene.add(slotGroup);
+  // Ghost spheres showing what the AI is currently searching.
+  candidateGroup = new THREE.Group();
+  scene.add(candidateGroup);
 
   raycaster = new THREE.Raycaster();
   pointer = new THREE.Vector2();
@@ -178,6 +181,15 @@ function animate() {
     const baseScale = m.userData.baseScale ?? 1;
     m.scale.setScalar(baseScale + Math.sin(t) * 0.05);
   });
+
+  // Pulse the AI's active candidate.
+  if (candidateGroup) {
+    const tt = performance.now() * 0.005;
+    const pulse = 1.0 + Math.sin(tt) * 0.12;
+    candidateGroup.children.forEach(m => {
+      if (m.userData.isActive) m.scale.setScalar(pulse);
+    });
+  }
 
   renderer.render(scene, camera);
 }
@@ -475,6 +487,70 @@ function addSlotIndicator(lv, r, c, type, color, isSource=false) {
   hit.userData = { type, lv, r, c, baseOpacity: 0, baseScale: 1, isHit: true };
   slotGroup.add(hit);
 }
+
+// AI ghost-sphere candidates ─────────────────────────────────────────────
+window.boardRenderCandidates = function (candidates) {
+  if (!candidateGroup) return;
+  clearGroup(candidateGroup);
+  if (!Array.isArray(candidates) || candidates.length === 0) return;
+  // Dedup by destination so an active+rank for the same slot don't double up;
+  // active wins.
+  const seen = new Map();
+  for (const c of candidates) {
+    if (!c || !c.move || !c.move.to) continue;
+    const [lv, r, col] = c.move.to;
+    const key = `${lv},${r},${col}`;
+    const cur = seen.get(key);
+    if (!cur || (c.kind === 'active' && cur.kind !== 'active')) {
+      seen.set(key, c);
+    }
+  }
+  for (const c of seen.values()) {
+    const [lv, r, col] = c.move.to;
+    const pos = slotCenter(lv, r, col);
+    const isActive = c.kind === 'active';
+    const isLift = c.move.type === 'lift';
+    const rank = c.rank ?? 0;
+    // Brighter for active and high-rank, fade out by rank.
+    const opacity = isActive ? 0.65 : Math.max(0.15, 0.55 - rank * 0.10);
+    const colorHex = isActive ? 0x9bd6ff : (isLift ? 0xffb38a : 0xc9d4ff);
+    const mat = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity,
+      roughness: 0.45,
+      metalness: 0.05,
+      emissive: isActive ? 0x4c7cff : 0x000000,
+      emissiveIntensity: isActive ? 0.45 : 0,
+      depthWrite: false,
+    });
+    const m = new THREE.Mesh(SHARED.marbleGeom, mat);
+    m.position.set(pos.x, pos.y, pos.z);
+    m.userData = { isActive };
+    candidateGroup.add(m);
+    // For a lift, also draw a thin marker on the source so you can see what
+    // marble the AI is considering moving.
+    if (isLift && c.move.from) {
+      const [fl, fr, fc] = c.move.from;
+      const fp = slotCenter(fl, fr, fc);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: colorHex, transparent: true, opacity: opacity * 0.7,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(MARBLE_RADIUS * 0.7, MARBLE_RADIUS * 0.95, 24),
+        ringMat,
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(fp.x, fp.y + MARBLE_RADIUS + 0.02, fp.z);
+      candidateGroup.add(ring);
+    }
+  }
+};
+
+window.boardClearCandidates = function () {
+  if (candidateGroup) clearGroup(candidateGroup);
+};
 
 // Exposed sync function
 window.boardReady = function () {

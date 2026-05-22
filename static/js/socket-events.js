@@ -41,14 +41,19 @@ function registerSocketEvents() {
     updatePlayerBars();
     updateStatus();
     window.boardRender?.();
-    // Hide the thinking bar once the AI's state arrives.
+    // Hide the thinking bar + clear ghost candidates once the AI's state arrives.
     if (data.current_player === state.yourPlayer || data.game_over) {
       hideAiThinking();
+      window.boardClearCandidates?.();
     }
   });
 
   s.on('ai_progress', (data) => {
     showAiThinking(data);
+  });
+
+  s.on('ai_candidates', (data) => {
+    window.boardRenderCandidates?.(data?.candidates || []);
   });
 
   s.on('new_game', (data) => {

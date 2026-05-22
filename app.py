@@ -115,7 +115,11 @@ def _ai_task(room_id, token):
                 "budget": budget,
             }, to=room_id)
 
-        seq = get_ai_super_move(game, room["difficulty"], progress_cb=progress)
+        def candidates(snapshot):
+            socketio.emit("ai_candidates", {"candidates": snapshot}, to=room_id)
+
+        seq = get_ai_super_move(game, room["difficulty"],
+                                progress_cb=progress, candidates_cb=candidates)
         if not seq:
             return
 

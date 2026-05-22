@@ -170,4 +170,5 @@ function hideAiThinking() {
   bar.classList.add('hidden');
   const fill = document.getElementById('ai-thinking-fill');
   if (fill) fill.style.width = '0%';
+  window.boardClearCandidates?.();
 }

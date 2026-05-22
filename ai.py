@@ -348,13 +348,56 @@ def _order_supers(supers, ai_player, cap):
     return supers[:cap]
 
 
+def _move_for_payload(seq):
+    """Extract the base move (first action) for transmission to the UI."""
+    if not seq:
+        return None
+    return seq[0]
+
+
 def _iterative_deepening(root_supers, ai_player, max_depth, time_limit,
-                          progress_cb=None):
-    """Search root_supers with iterative deepening. Returns (best_seq, depth_reached, nodes)."""
+                          progress_cb=None, candidates_cb=None):
+    """Search root_supers with iterative deepening. Returns (best_seq, depth_reached, nodes).
+
+    candidates_cb, if provided, is called with a list:
+      [{move, score?, rank?, kind: 'active'|'rank', depth}, ...]
+    so the UI can visualize what the AI is currently searching.
+    """
     ctx = _SearchCtx(ai_player, time_limit, progress_cb)
     ordering = list(range(len(root_supers)))
     best_seq = root_supers[ordering[0]][0]
     depth_done = 0
+    last_candidates_emit = 0.0
+
+    def _emit_candidates(active_idx, iter_scores, depth):
+        """Throttled snapshot of (active move, top N by score so far)."""
+        nonlocal last_candidates_emit
+        if candidates_cb is None:
+            return
+        now = time.monotonic()
+        if now - last_candidates_emit < 0.18:
+            return
+        last_candidates_emit = now
+        snapshot = []
+        if active_idx is not None:
+            snapshot.append({
+                "move": _move_for_payload(root_supers[active_idx][0]),
+                "kind": "active",
+                "depth": depth,
+            })
+        ranked = sorted(iter_scores, key=lambda x: x[1], reverse=True)[:5]
+        for rank, (ix, sc) in enumerate(ranked):
+            snapshot.append({
+                "move": _move_for_payload(root_supers[ix][0]),
+                "kind": "rank",
+                "rank": rank,
+                "score": sc,
+                "depth": depth,
+            })
+        try:
+            candidates_cb(snapshot)
+        except Exception:
+            pass
 
     for d in range(1, max_depth + 1):
         # If we've already used 60% of the budget, don't start a new (more
@@ -370,6 +413,8 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit,
             iter_best_seq = root_supers[ordering[0]][0]
             alpha = float("-inf")
             for idx in ordering:
+                # Throttled "we're about to evaluate this root move" event.
+                _emit_candidates(idx, iter_scores, d)
                 seq, g2 = root_supers[idx]
                 # After our move it's opponent's turn — minimizing side.
                 score = _minimax(g2, d - 1, alpha, float("inf"), ctx)
@@ -392,18 +437,19 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit,
                     progress_cb(ctx.nodes, depth_done, now - ctx.start, time_limit)
                 except Exception:
                     pass
+            # And a final candidates snapshot (no active, just the ranking).
+            _emit_candidates(None, iter_scores, d)
         except _Timeout:
             break
 
     return best_seq, depth_done, ctx.nodes
 
 
-def get_ai_super_move(game, difficulty, progress_cb=None):
+def get_ai_super_move(game, difficulty, progress_cb=None, candidates_cb=None):
     """Return list of actions for the AI to play out (place/lift + retrieves).
 
-    progress_cb, if provided, is invoked periodically as
-        progress_cb(nodes_evaluated, depth_completed, elapsed_seconds, budget_seconds)
-    so the UI can render a thinking-progress bar.
+    progress_cb(nodes, depth, elapsed, budget) drives the thinking-progress bar.
+    candidates_cb(list_of_candidates) drives the on-board ghost-sphere preview.
     """
     supers = _enumerate_super_moves(game)
     if not supers:
@@ -439,5 +485,6 @@ def get_ai_super_move(game, difficulty, progress_cb=None):
         return supers[0][0]
 
     best_seq, _depth, _nodes = _iterative_deepening(
-        supers, ai_player, max_depth, time_limit, progress_cb=progress_cb)
+        supers, ai_player, max_depth, time_limit,
+        progress_cb=progress_cb, candidates_cb=candidates_cb)
     return best_seq
