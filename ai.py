@@ -80,9 +80,15 @@ def _heuristic(game, ai_player):
                 else:
                     score -= w
 
-    # ── 2x2 formation pressure. Threats now scaled higher — the reserve
-    # race is the whole game and a 3-unblocked square is a free +2 marbles
-    # next move. Weight rises with level since higher squares matter more.
+    # Near-completion multipliers depend on whose turn it is. The side
+    # about to move can complete (or block) immediately, so weights are
+    # massively biased toward whoever moves next.
+    next_is_ai = (game.current_player == ai_player)
+    ai_near = 5.0 if next_is_ai else 2.0
+    opp_near = 2.0 if next_is_ai else 5.0
+
+    # ── 2x2 formation pressure. A 3-unblocked square is a free +2 marbles
+    # for whoever closes it. Weight rises with level.
     for lv in range(NUM_LEVELS - 1):
         s = level_size(lv)
         threat_w = 3.0 + lv * 3.5
@@ -97,13 +103,51 @@ def _heuristic(game, ai_player):
                 elif opp_cnt == 4:
                     score -= threat_w * 3.0
                 elif ai_cnt == 3 and opp_cnt == 0:
-                    score += threat_w * 2.0
+                    score += threat_w * ai_near
                 elif opp_cnt == 3 and ai_cnt == 0:
-                    score -= threat_w * 2.0
+                    score -= threat_w * opp_near
                 elif ai_cnt == 2 and opp_cnt == 0:
-                    score += threat_w * 0.6
+                    score += threat_w * 0.8
                 elif opp_cnt == 2 and ai_cnt == 0:
-                    score -= threat_w * 0.6
+                    score -= threat_w * 0.8
+
+    # ── Line (row/column) formation pressure. Same as squares — a 3-in-row
+    # on lvl 1 or 4-in-row on lvl 0 also fires the bonus.
+    for lv in (0, 1):
+        s = level_size(lv)
+        line_w = 4.0 + lv * 4.5
+        for r in range(s):
+            cells = tuple(board[lv][r][c] for c in range(s))
+            ai_cnt = cells.count(ai_player)
+            opp_cnt = cells.count(opp)
+            if ai_cnt == s:
+                score += line_w * 3.0
+            elif opp_cnt == s:
+                score -= line_w * 3.0
+            elif ai_cnt == s - 1 and opp_cnt == 0:
+                score += line_w * ai_near
+            elif opp_cnt == s - 1 and ai_cnt == 0:
+                score -= line_w * opp_near
+            elif ai_cnt == s - 2 and opp_cnt == 0 and s >= 3:
+                score += line_w * 0.6
+            elif opp_cnt == s - 2 and ai_cnt == 0 and s >= 3:
+                score -= line_w * 0.6
+        for c in range(s):
+            cells = tuple(board[lv][r][c] for r in range(s))
+            ai_cnt = cells.count(ai_player)
+            opp_cnt = cells.count(opp)
+            if ai_cnt == s:
+                score += line_w * 3.0
+            elif opp_cnt == s:
+                score -= line_w * 3.0
+            elif ai_cnt == s - 1 and opp_cnt == 0:
+                score += line_w * ai_near
+            elif opp_cnt == s - 1 and ai_cnt == 0:
+                score -= line_w * opp_near
+            elif ai_cnt == s - 2 and opp_cnt == 0 and s >= 3:
+                score += line_w * 0.6
+            elif opp_cnt == s - 2 and ai_cnt == 0 and s >= 3:
+                score -= line_w * 0.6
 
     # ── Mobility — non-pinned own marbles give lift flexibility. ────────────
     ai_lifts = len(game.liftable_marbles(ai_player))
@@ -280,9 +324,9 @@ def get_ai_super_move(game, difficulty):
         cap = 60
         time_limit = 0.8
     else:  # hard
-        max_depth = 8        # iterative deepening will rarely reach this
-        cap = 180
-        time_limit = 4.0
+        max_depth = 10       # iterative deepening will rarely reach this
+        cap = 220
+        time_limit = 6.0
 
     supers = _order_supers(supers, ai_player, cap)
     if len(supers) == 1:
