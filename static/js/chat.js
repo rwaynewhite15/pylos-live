@@ -1,7 +1,7 @@
 function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
-  if (!text || !state.socket) return;
+  if (!text || !state.socket || state.mode === 'ai') return;
   state.socket.emit('chat', { text });
   input.value = '';
 }

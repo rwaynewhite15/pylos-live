@@ -16,6 +16,7 @@ function registerSocketEvents() {
     document.getElementById('gh-mode').textContent =
       state.mode === 'ai' ? `vs AI (${state.difficulty})` : 'vs Player';
     document.getElementById('gh-room').textContent = state.roomId ? `Room: ${state.roomId}` : '';
+    document.getElementById('chat-area').style.display = state.mode === 'ai' ? 'none' : '';
     if (data.mode === 'pvp' && !data.opponent) {
       // creator, still waiting
     } else {
