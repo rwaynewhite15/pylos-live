@@ -1,6 +1,7 @@
 // Lobby + in-game leaderboard panels.
 
 let _lbDifficulty = 'all';
+let _lbLastRows = [];
 
 function filterLeaderboard(d) {
   _lbDifficulty = d;
@@ -11,14 +12,23 @@ function filterLeaderboard(d) {
   loadLeaderboard();
 }
 
+function _nameMatches(rowName) {
+  return rowName && state.myName &&
+         rowName.trim().toLowerCase() === state.myName.trim().toLowerCase();
+}
+
 function renderLeaderboard(rows, target) {
   if (!rows.length) {
     target.innerHTML = '<p class="muted center small">No scores yet — be the first!</p>';
     return;
   }
-  let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Diff</th><th class="num">W</th><th class="num">L</th><th class="num">T</th></tr></thead><tbody>';
+  let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Diff</th><th class="num">W</th><th class="num">L</th><th></th></tr></thead><tbody>';
   rows.forEach((r, i) => {
-    html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td>${r.difficulty}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${r.ties}</td></tr>`;
+    const canDelete = _nameMatches(r.name);
+    const delBtn = canDelete
+      ? `<button class="lb-del" onclick="deleteLeaderboardEntry(${r.id})" title="Delete this entry">×</button>`
+      : '';
+    html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td>${r.difficulty}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${delBtn}</td></tr>`;
   });
   html += '</tbody></table>';
   target.innerHTML = html;
@@ -27,26 +37,44 @@ function renderLeaderboard(rows, target) {
 function loadLeaderboard() {
   const qs = (_lbDifficulty === 'all') ? '' : '?difficulty=' + _lbDifficulty;
   fetch('/leaderboard' + qs).then(r => r.json()).then(rows => {
+    _lbLastRows = rows || [];
     const lobby = document.getElementById('lb-body');
-    if (lobby) renderLeaderboard(rows || [], lobby);
+    if (lobby) renderLeaderboard(_lbLastRows, lobby);
     const game = document.getElementById('game-lb-body');
-    if (game) renderLeaderboard(rows || [], game);
+    if (game) renderLeaderboard(_lbLastRows, game);
   }).catch(() => {});
+}
+
+function deleteLeaderboardEntry(id) {
+  if (!confirm('Delete this leaderboard entry?')) return;
+  fetch('/leaderboard/delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ id, name: state.myName }),
+  }).then(r => r.json()).then(j => {
+    if (j.ok) loadLeaderboard();
+    else showError(j.error || 'Delete failed');
+  }).catch(() => showError('Network error'));
 }
 
 function submitScore() {
   if (state.mode !== 'ai') return;
-  const wins = (state.game.winner === state.yourPlayer) ? 1 : 0;
-  const losses = (state.game.winner === (1 - state.yourPlayer)) ? 1 : 0;
-  const ties = (state.game.winner === null) ? 1 : 0;
+  // Post the WHOLE series (wins/losses across all games played so far in
+  // this room), not just the latest game.
+  const wins = state.myScore || 0;
+  const losses = state.oppScore || 0;
+  if (wins + losses === 0) {
+    showError('No games played yet');
+    return;
+  }
   fetch('/submit_score', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       name: state.myName, difficulty: state.difficulty,
-      wins, losses, ties,
+      wins, losses,
     })
   }).then(r => r.json()).then(j => {
     if (j.ok) {
+      state.seriesPosted = true;
       document.getElementById('post-lb-btn').style.display = 'none';
       loadLeaderboard();
     } else {
@@ -72,13 +100,28 @@ function loadPvpRankings() {
   fetch('/pvp/rankings').then(r => r.json()).then(rows => {
     const body = document.getElementById('pvp-rankings-body');
     if (!rows.length) { body.innerHTML = '<p class="muted center small">No ranked games yet.</p>'; return; }
-    let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th class="num">ELO</th><th class="num">W</th><th class="num">L</th><th class="num">T</th></tr></thead><tbody>';
+    let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th class="num">ELO</th><th class="num">W</th><th class="num">L</th><th></th></tr></thead><tbody>';
     rows.forEach((r, i) => {
-      html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td class="num">${r.elo}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${r.ties}</td></tr>`;
+      const canDelete = _nameMatches(r.name);
+      const delBtn = canDelete
+        ? `<button class="lb-del" onclick="deletePvpPlayer('${escapeJs(r.name)}')" title="Remove your ranking">×</button>`
+        : '';
+      html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td class="num">${r.elo}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${delBtn}</td></tr>`;
     });
     html += '</tbody></table>';
     body.innerHTML = html;
   }).catch(() => {});
+}
+
+function deletePvpPlayer(name) {
+  if (!confirm(`Remove "${name}" from PvP rankings? Your game history will also be deleted.`)) return;
+  fetch('/pvp/player/delete', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, requester: state.myName }),
+  }).then(r => r.json()).then(j => {
+    if (j.ok) { loadPvpRankings(); loadPvpHistory(); }
+    else showError(j.error || 'Delete failed');
+  }).catch(() => showError('Network error'));
 }
 
 function loadPvpHistory() {
@@ -94,7 +137,7 @@ function loadPvpHistory() {
       html += `<tr>
         <td>${escapeHtml(r.p1)}</td>
         <td>${escapeHtml(r.p2)}</td>
-        <td>${r.winner ? escapeHtml(r.winner) : 'Draw'}</td>
+        <td>${escapeHtml(r.winner || '—')}</td>
         <td class="num">${r.p1_elo} <span class="${c1}">(${sign1}${r.p1_elo_change})</span></td>
         <td class="num">${r.p2_elo} <span class="${c2}">(${sign2}${r.p2_elo_change})</span></td>
       </tr>`;
@@ -112,7 +155,7 @@ function lookupPlayer() {
     if (j.error) { body.innerHTML = `<p class="muted center small">${escapeHtml(j.error)}</p>`; return; }
     let html = `<div class="card" style="margin:0 0 12px;padding:14px">
       <h3 style="margin:0 0 8px">${escapeHtml(j.name)}</h3>
-      <p class="muted small" style="margin:0">ELO ${j.elo} · ${j.wins}W ${j.losses}L ${j.ties}T (${j.games} games)</p>
+      <p class="muted small" style="margin:0">ELO ${j.elo} · ${j.wins}W ${j.losses}L (${j.games} games)</p>
     </div>`;
     if (j.history.length) {
       html += '<table class="lb"><thead><tr><th>vs</th><th>Result</th><th class="num">Δ ELO</th></tr></thead><tbody>';
@@ -120,9 +163,7 @@ function lookupPlayer() {
         const me = j.name;
         const opp = (g.p1 === me) ? g.p2 : g.p1;
         const my_change = (g.p1 === me) ? g.p1_elo_change : g.p2_elo_change;
-        let res = 'Draw';
-        if (g.winner === me) res = 'Win';
-        else if (g.winner && g.winner !== me) res = 'Loss';
+        const res = (g.winner === me) ? 'Win' : 'Loss';
         const sign = my_change >= 0 ? '+' : '';
         const cls = my_change >= 0 ? 'pos-elo' : 'neg-elo';
         html += `<tr><td>${escapeHtml(opp)}</td><td>${res}</td><td class="num ${cls}">${sign}${my_change}</td></tr>`;
@@ -136,4 +177,8 @@ function lookupPlayer() {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function escapeJs(s) {
+  return String(s).replace(/['\\]/g, '\\$&');
 }

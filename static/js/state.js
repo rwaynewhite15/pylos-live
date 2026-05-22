@@ -17,4 +17,5 @@ const state = {
   // local UI
   liftFrom: null,      // {lv,r,c} when user is mid-lift
   pending: false,      // submitted a move, waiting for server
+  seriesPosted: false, // user has already posted this room's series record
 };

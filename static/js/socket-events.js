@@ -41,6 +41,14 @@ function registerSocketEvents() {
     updatePlayerBars();
     updateStatus();
     window.boardRender?.();
+    // Hide the thinking bar once the AI's state arrives.
+    if (data.current_player === state.yourPlayer || data.game_over) {
+      hideAiThinking();
+    }
+  });
+
+  s.on('ai_progress', (data) => {
+    showAiThinking(data);
   });
 
   s.on('new_game', (data) => {

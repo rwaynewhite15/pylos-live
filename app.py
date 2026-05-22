@@ -107,7 +107,15 @@ def _ai_task(room_id, token):
         if not game or game.game_over or game.current_player != 1:
             return
 
-        seq = get_ai_super_move(game, room["difficulty"])
+        def progress(nodes, depth, elapsed, budget):
+            socketio.emit("ai_progress", {
+                "nodes": nodes,
+                "depth": depth,
+                "elapsed": elapsed,
+                "budget": budget,
+            }, to=room_id)
+
+        seq = get_ai_super_move(game, room["difficulty"], progress_cb=progress)
         if not seq:
             return
 
@@ -140,19 +148,19 @@ def leaderboard():
         cur = conn.cursor()
         if difficulty in ("easy", "medium", "hard"):
             cur.execute(
-                f"SELECT name, difficulty, wins, losses, ties FROM pylos_leaderboard "
-                f"WHERE difficulty = {_PH} ORDER BY wins DESC, losses ASC, ties DESC LIMIT 20",
+                f"SELECT id, name, difficulty, wins, losses FROM pylos_leaderboard "
+                f"WHERE difficulty = {_PH} ORDER BY wins DESC, losses ASC LIMIT 20",
                 (difficulty,)
             )
         else:
             cur.execute(
-                "SELECT name, difficulty, wins, losses, ties FROM pylos_leaderboard "
-                "ORDER BY wins DESC, losses ASC, ties DESC LIMIT 20"
+                "SELECT id, name, difficulty, wins, losses FROM pylos_leaderboard "
+                "ORDER BY wins DESC, losses ASC LIMIT 20"
             )
         rows = cur.fetchall()
         conn.close()
         return jsonify([
-            {"name": r[0], "difficulty": r[1], "wins": r[2], "losses": r[3], "ties": r[4]}
+            {"id": r[0], "name": r[1], "difficulty": r[2], "wins": r[3], "losses": r[4]}
             for r in rows
         ])
     except Exception as e:
@@ -167,20 +175,57 @@ def submit_score():
     try:
         wins   = int(data.get("wins",   0))
         losses = int(data.get("losses", 0))
-        ties   = int(data.get("ties",   0))
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid data"}), 400
     if difficulty not in ("easy", "medium", "hard"):
         return jsonify({"error": "Invalid difficulty"}), 400
-    if wins + losses + ties == 0:
+    if wins + losses == 0:
         return jsonify({"error": "No games played"}), 400
     try:
         conn = _db_conn()
         cur = conn.cursor()
+        # Pylos has no ties — column is kept at 0 for schema compat.
         cur.execute(
             f"INSERT INTO pylos_leaderboard (name, difficulty, wins, losses, ties) "
-            f"VALUES ({_PH}, {_PH}, {_PH}, {_PH}, {_PH})",
-            (name, difficulty, wins, losses, ties)
+            f"VALUES ({_PH}, {_PH}, {_PH}, {_PH}, 0)",
+            (name, difficulty, wins, losses)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/leaderboard/delete", methods=["POST"])
+def leaderboard_delete():
+    """Delete a leaderboard entry by id. The provided `name` must match
+    the row's name (case-insensitive) so users can only remove their own."""
+    data = request.get_json(force=True) or {}
+    try:
+        entry_id = int(data.get("id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid id"}), 400
+    name = str(data.get("name", "")).strip().lower()
+    if not entry_id or not name:
+        return jsonify({"error": "Missing id or name"}), 400
+    try:
+        conn = _db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT name FROM pylos_leaderboard WHERE id = {_PH}",
+            (entry_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Entry not found"}), 404
+        if row[0].strip().lower() != name:
+            conn.close()
+            return jsonify({"error": "Name does not match this entry"}), 403
+        cur.execute(
+            f"DELETE FROM pylos_leaderboard WHERE id = {_PH}",
+            (entry_id,)
         )
         conn.commit()
         conn.close()
@@ -195,13 +240,13 @@ def pvp_rankings():
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            "SELECT display_name, elo, wins, losses, ties, games_played "
+            "SELECT display_name, elo, wins, losses, games_played "
             "FROM pylos_players ORDER BY elo DESC LIMIT 20"
         )
         rows = cur.fetchall()
         conn.close()
         return jsonify([
-            {"name": r[0], "elo": r[1], "wins": r[2], "losses": r[3], "ties": r[4], "games": r[5]}
+            {"name": r[0], "elo": r[1], "wins": r[2], "losses": r[3], "games": r[4]}
             for r in rows
         ])
     except Exception as e:
@@ -236,7 +281,7 @@ def pvp_player(name):
         conn = _db_conn()
         cur = conn.cursor()
         cur.execute(
-            f"SELECT display_name, elo, wins, losses, ties, games_played FROM pylos_players WHERE name = {_PH}",
+            f"SELECT display_name, elo, wins, losses, games_played FROM pylos_players WHERE name = {_PH}",
             (key,)
         )
         player = cur.fetchone()
@@ -253,13 +298,40 @@ def pvp_player(name):
         conn.close()
         return jsonify({
             "name": player[0], "elo": player[1],
-            "wins": player[2], "losses": player[3], "ties": player[4], "games": player[5],
+            "wins": player[2], "losses": player[3], "games": player[4],
             "history": [{
                 "p1": g[0], "p2": g[1], "p1_reserve": g[2], "p2_reserve": g[3],
                 "winner": g[4], "p1_elo_change": g[5], "p2_elo_change": g[6],
                 "p1_elo": g[7], "p2_elo": g[8], "played_at": str(g[9])
             } for g in games]
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/pvp/player/delete", methods=["POST"])
+def pvp_player_delete():
+    """Remove a PvP player entry and their game history. Only the player
+    themselves can do it — requester's name must match (case-insensitive)."""
+    data = request.get_json(force=True) or {}
+    name = str(data.get("name", "")).strip()
+    requester = str(data.get("requester", "")).strip()
+    if not name or not requester:
+        return jsonify({"error": "Missing name"}), 400
+    if name.lower() != requester.lower():
+        return jsonify({"error": "Only the player can remove their own ranking"}), 403
+    key = name.lower()
+    try:
+        conn = _db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            f"DELETE FROM pylos_pvp_games WHERE p1_name = {_PH} OR p2_name = {_PH}",
+            (key, key)
+        )
+        cur.execute(f"DELETE FROM pylos_players WHERE name = {_PH}", (key,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -238,11 +238,44 @@ class _Timeout(Exception):
     pass
 
 
-def _minimax(game, depth, alpha, beta, ai_player, deadline, tt):
-    if deadline is not None and time.monotonic() > deadline:
-        raise _Timeout
+class _SearchCtx:
+    """Bundles search-wide state: deadline, TT, ai_player, and progress
+    reporting. Passed by reference through _minimax so we don't have to
+    thread 7 positional args through every recursion."""
+    __slots__ = ("ai_player", "deadline", "tt", "progress_cb",
+                 "start", "time_limit", "nodes", "last_progress", "current_depth")
+
+    def __init__(self, ai_player, time_limit, progress_cb=None):
+        self.ai_player = ai_player
+        self.start = time.monotonic()
+        self.deadline = self.start + time_limit
+        self.tt = {}
+        self.progress_cb = progress_cb
+        self.time_limit = time_limit
+        self.nodes = 0
+        self.last_progress = 0.0
+        self.current_depth = 0
+
+    def tick(self):
+        self.nodes += 1
+        # Throttled work: only check time and emit progress every 2048 nodes.
+        if self.nodes & 2047 == 0:
+            now = time.monotonic()
+            if now > self.deadline:
+                raise _Timeout
+            if self.progress_cb is not None and now - self.last_progress > 0.1:
+                self.last_progress = now
+                try:
+                    self.progress_cb(self.nodes, self.current_depth,
+                                     now - self.start, self.time_limit)
+                except Exception:
+                    pass  # never let UI plumbing crash the search
+
+
+def _minimax(game, depth, alpha, beta, ctx):
+    ctx.tick()
     if game.game_over:
-        if game.winner == ai_player:
+        if game.winner == ctx.ai_player:
             return 10000.0
         if game.winner is None:
             return 0.0
@@ -250,42 +283,39 @@ def _minimax(game, depth, alpha, beta, ai_player, deadline, tt):
 
     # Transposition table probe.
     alpha_orig = alpha
-    key = _state_key(game) if tt is not None else None
-    if key is not None:
-        entry = tt.get(key)
-        if entry is not None and entry[0] >= depth:
-            _d, val, flag = entry
-            if flag == _TT_EXACT:
-                return val
-            if flag == _TT_LOWER and val > alpha:
-                alpha = val
-            elif flag == _TT_UPPER and val < beta:
-                beta = val
-            if alpha >= beta:
-                return val
+    key = _state_key(game)
+    entry = ctx.tt.get(key)
+    if entry is not None and entry[0] >= depth:
+        _d, val, flag = entry
+        if flag == _TT_EXACT:
+            return val
+        if flag == _TT_LOWER and val > alpha:
+            alpha = val
+        elif flag == _TT_UPPER and val < beta:
+            beta = val
+        if alpha >= beta:
+            return val
 
     if depth == 0:
-        h = _heuristic(game, ai_player)
-        if key is not None:
-            tt[key] = (0, h, _TT_EXACT)
+        h = _heuristic(game, ctx.ai_player)
+        ctx.tt[key] = (0, h, _TT_EXACT)
         return h
 
     supers = _enumerate_super_moves(game)
     if not supers:
-        h = _heuristic(game, ai_player)
-        if key is not None:
-            tt[key] = (depth, h, _TT_EXACT)
+        h = _heuristic(game, ctx.ai_player)
+        ctx.tt[key] = (depth, h, _TT_EXACT)
         return h
 
-    maximizing = (game.current_player == ai_player)
+    maximizing = (game.current_player == ctx.ai_player)
     # Order children by static eval so cutoffs trigger early.
-    supers.sort(key=lambda tup: _heuristic(tup[1], ai_player), reverse=maximizing)
+    supers.sort(key=lambda tup: _heuristic(tup[1], ctx.ai_player), reverse=maximizing)
     if len(supers) > _INTERNAL_CAP:
         supers = supers[:_INTERNAL_CAP]
 
     best = float("-inf") if maximizing else float("inf")
     for _seq, g2 in supers:
-        val = _minimax(g2, depth - 1, alpha, beta, ai_player, deadline, tt)
+        val = _minimax(g2, depth - 1, alpha, beta, ctx)
         if maximizing:
             if val > best:
                 best = val
@@ -300,16 +330,15 @@ def _minimax(game, depth, alpha, beta, ai_player, deadline, tt):
             break
 
     # Store result with appropriate flag.
-    if key is not None:
-        if best <= alpha_orig:
-            flag = _TT_UPPER
-        elif best >= beta:
-            flag = _TT_LOWER
-        else:
-            flag = _TT_EXACT
-        # Bound table size to avoid runaway memory.
-        if len(tt) < 800_000:
-            tt[key] = (depth, best, flag)
+    if best <= alpha_orig:
+        flag = _TT_UPPER
+    elif best >= beta:
+        flag = _TT_LOWER
+    else:
+        flag = _TT_EXACT
+    # Bound table size to avoid runaway memory.
+    if len(ctx.tt) < 800_000:
+        ctx.tt[key] = (depth, best, flag)
 
     return best
 
@@ -319,24 +348,21 @@ def _order_supers(supers, ai_player, cap):
     return supers[:cap]
 
 
-def _iterative_deepening(root_supers, ai_player, max_depth, time_limit):
-    """Search root_supers with iterative deepening. Returns (best_seq, depth_reached)."""
-    start = time.monotonic()
-    deadline = start + time_limit
-    # Start with static-eval order; refine after each completed depth.
+def _iterative_deepening(root_supers, ai_player, max_depth, time_limit,
+                          progress_cb=None):
+    """Search root_supers with iterative deepening. Returns (best_seq, depth_reached, nodes)."""
+    ctx = _SearchCtx(ai_player, time_limit, progress_cb)
     ordering = list(range(len(root_supers)))
     best_seq = root_supers[ordering[0]][0]
     depth_done = 0
-    # Transposition table persists across all iterations of this call —
-    # deeper iterations massively reuse work from shallower ones.
-    tt = {}
 
     for d in range(1, max_depth + 1):
         # If we've already used 60% of the budget, don't start a new (more
         # expensive) depth — we'd likely time out mid-iteration.
-        elapsed = time.monotonic() - start
+        elapsed = time.monotonic() - ctx.start
         if d > 1 and elapsed > time_limit * 0.6:
             break
+        ctx.current_depth = d
 
         try:
             iter_scores = []
@@ -346,8 +372,7 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit):
             for idx in ordering:
                 seq, g2 = root_supers[idx]
                 # After our move it's opponent's turn — minimizing side.
-                score = _minimax(g2, d - 1, alpha, float("inf"),
-                                 ai_player, deadline, tt)
+                score = _minimax(g2, d - 1, alpha, float("inf"), ctx)
                 iter_scores.append((idx, score))
                 if score > iter_best_score:
                     iter_best_score = score
@@ -360,14 +385,26 @@ def _iterative_deepening(root_supers, ai_player, max_depth, time_limit):
             # Re-order: best move first next iteration → biggest pruning win.
             iter_scores.sort(key=lambda x: x[1], reverse=True)
             ordering = [idx for idx, _ in iter_scores]
+            # Push a progress event at the boundary so the bar advances by depth.
+            if progress_cb is not None:
+                now = time.monotonic()
+                try:
+                    progress_cb(ctx.nodes, depth_done, now - ctx.start, time_limit)
+                except Exception:
+                    pass
         except _Timeout:
             break
 
-    return best_seq, depth_done
+    return best_seq, depth_done, ctx.nodes
 
 
-def get_ai_super_move(game, difficulty):
-    """Return list of actions for the AI to play out (place/lift + retrieves)."""
+def get_ai_super_move(game, difficulty, progress_cb=None):
+    """Return list of actions for the AI to play out (place/lift + retrieves).
+
+    progress_cb, if provided, is invoked periodically as
+        progress_cb(nodes_evaluated, depth_completed, elapsed_seconds, budget_seconds)
+    so the UI can render a thinking-progress bar.
+    """
     supers = _enumerate_super_moves(game)
     if not supers:
         return None
@@ -385,18 +422,14 @@ def get_ai_super_move(game, difficulty):
     else:  # hard
         combined_reserve = game.reserve[0] + game.reserve[1]
         if combined_reserve <= 10:
-            # Endgame: branching factor is small, TT hits dense.
-            # Crank the budget — this is where the AI should be perfect.
             max_depth = 30
             cap = 260
             time_limit = 18.0
         elif combined_reserve <= 18:
-            # Midgame: deeper than opening, narrower tree than full game.
             max_depth = 14
             cap = 240
             time_limit = 9.0
         else:
-            # Opening: branching factor is huge, deep search wastes time.
             max_depth = 10
             cap = 220
             time_limit = 6.0
@@ -405,5 +438,6 @@ def get_ai_super_move(game, difficulty):
     if len(supers) == 1:
         return supers[0][0]
 
-    best_seq, _ = _iterative_deepening(supers, ai_player, max_depth, time_limit)
+    best_seq, _depth, _nodes = _iterative_deepening(
+        supers, ai_player, max_depth, time_limit, progress_cb=progress_cb)
     return best_seq

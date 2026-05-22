@@ -236,6 +236,35 @@ input[type=text]:focus, select:focus { border-color: var(--primary); }
   margin-bottom: 10px;
 }
 
+#ai-thinking {
+  background: rgba(76, 124, 255, .08);
+  border: 1px solid rgba(76, 124, 255, .25);
+  padding: 8px 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+#ai-thinking.hidden { display: none; }
+.ai-thinking-info {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: .85rem;
+  margin-bottom: 6px;
+}
+.ai-thinking-label { font-weight: 700; color: var(--primary-2); }
+.ai-thinking-stats { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ai-thinking-track {
+  height: 6px;
+  background: rgba(255,255,255,.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ai-thinking-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--primary), var(--gold));
+  border-radius: 999px;
+  transition: width 0.15s ease-out;
+}
+
 #retrieve-bar {
   display: flex; gap: 12px; align-items: center; justify-content: space-between;
   background: rgba(255,209,102,.12);
@@ -301,3 +330,19 @@ table.lb td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .pos-elo { color: #6ce06c; }
 .neg-elo { color: var(--danger); }
+
+.lb-del {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  width: 22px; height: 22px; line-height: 1;
+  font-size: .95rem;
+  cursor: pointer;
+  padding: 0;
+}
+.lb-del:hover {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}

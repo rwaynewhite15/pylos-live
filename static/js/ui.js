@@ -122,7 +122,7 @@ function showGameOver() {
     <div style="margin-top:6px">Series — you: <b>${state.myScore}</b>, opp: <b>${state.oppScore}</b> (${state.gamesPlayed} games)</div>
   `;
   const post = document.getElementById('post-lb-btn');
-  post.style.display = (state.mode === 'ai') ? '' : 'none';
+  post.style.display = (state.mode === 'ai' && !state.seriesPosted) ? '' : 'none';
 }
 
 function hideGameOver() {
@@ -135,6 +135,7 @@ function goToMainMenu() {
   state.roomId = null;
   state.game = null;
   state.liftFrom = null;
+  state.seriesPosted = false;
   hideGameOver();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('retrieve-bar').classList.add('hidden');
@@ -147,4 +148,26 @@ function goToMainMenu() {
 function copyCode() {
   const code = document.getElementById('waiting-code').textContent;
   navigator.clipboard?.writeText(code);
+}
+
+function showAiThinking({ nodes, depth, elapsed, budget }) {
+  const bar = document.getElementById('ai-thinking');
+  if (!bar) return;
+  bar.classList.remove('hidden');
+  const fill = document.getElementById('ai-thinking-fill');
+  const pct = Math.min(100, (elapsed / Math.max(budget, 0.001)) * 100);
+  if (fill) fill.style.width = pct.toFixed(1) + '%';
+  const stats = document.getElementById('ai-thinking-stats');
+  if (stats) {
+    const n = (nodes || 0).toLocaleString();
+    stats.textContent = `depth ${depth} • ${n} positions`;
+  }
+}
+
+function hideAiThinking() {
+  const bar = document.getElementById('ai-thinking');
+  if (!bar) return;
+  bar.classList.add('hidden');
+  const fill = document.getElementById('ai-thinking-fill');
+  if (fill) fill.style.width = '0%';
 }
