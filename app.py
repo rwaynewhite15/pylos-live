@@ -28,7 +28,8 @@ from db import _db_conn, _PH, _record_pvp_game
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pylos-dev-secret")
-socketio = SocketIO(app, async_mode="gevent", cors_allowed_origins="*")
+socketio = SocketIO(app, async_mode="gevent", cors_allowed_origins="*",
+                   ping_interval=25, ping_timeout=60)
 
 rooms = {}        # room_id -> room dict
 sid_to_room = {}  # sid -> room_id
@@ -142,6 +143,11 @@ def _ai_task(room_id, token):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route("/ping")
+def ping():
+    return "ok"
+
 
 @app.route("/")
 def index():
