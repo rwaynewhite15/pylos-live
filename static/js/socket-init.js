@@ -1,7 +1,16 @@
+// Ping the server every 10 minutes so Render's free tier doesn't spin the
+// dyno down mid-game (free dynos sleep after ~15 minutes of no HTTP traffic).
+let _keepAliveTimer = null;
+function _startKeepAlive() {
+  if (_keepAliveTimer) return;
+  _keepAliveTimer = setInterval(() => fetch('/ping').catch(() => {}), 10 * 60 * 1000);
+}
+
 function initSocket() {
   if (state.socket) { try { state.socket.disconnect(); } catch(_){} }
   state.socket = io({ transports: ['websocket', 'polling'] });
   registerSocketEvents();
+  _startKeepAlive();
 }
 
 function createRoom() {
