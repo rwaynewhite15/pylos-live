@@ -16,9 +16,10 @@ function renderLeaderboard(rows, target) {
     target.innerHTML = '<p class="muted center small">No scores yet — be the first!</p>';
     return;
   }
-  let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Diff</th><th class="num">W</th><th class="num">L</th></tr></thead><tbody>';
+  let html = '<table class="lb"><thead><tr><th>#</th><th>Name</th><th>Diff</th><th class="num">W</th><th class="num">L</th><th class="num">Games</th></tr></thead><tbody>';
   rows.forEach((r, i) => {
-    html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td>${r.difficulty}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td></tr>`;
+    const games = r.wins + r.losses;
+    html += `<tr><td class="rank">${i+1}</td><td>${escapeHtml(r.name)}</td><td>${r.difficulty}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${games}</td></tr>`;
   });
   html += '</tbody></table>';
   target.innerHTML = html;

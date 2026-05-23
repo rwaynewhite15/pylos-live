@@ -122,6 +122,48 @@ def _init_db():
         conn.close()
     except Exception as e:
         print(f"DB init error: {e}")
+    _consolidate_leaderboard()
+
+
+def _consolidate_leaderboard():
+    """Merge duplicate (name, difficulty) rows left over from the old insert-only logic."""
+    try:
+        conn = _db_conn()
+        cur = conn.cursor()
+        if _USE_PG:
+            cur.execute("""
+                WITH agg AS (
+                    SELECT MIN(id) AS keep_id,
+                           name, difficulty,
+                           SUM(wins)   AS total_wins,
+                           SUM(losses) AS total_losses
+                    FROM pylos_leaderboard
+                    GROUP BY name, difficulty
+                    HAVING COUNT(*) > 1
+                )
+                UPDATE pylos_leaderboard lb
+                SET wins = agg.total_wins, losses = agg.total_losses
+                FROM agg WHERE lb.id = agg.keep_id
+            """)
+        else:
+            cur.execute("""
+                UPDATE pylos_leaderboard
+                SET wins   = (SELECT SUM(b.wins)   FROM pylos_leaderboard b WHERE b.name = pylos_leaderboard.name AND b.difficulty = pylos_leaderboard.difficulty),
+                    losses = (SELECT SUM(b.losses)  FROM pylos_leaderboard b WHERE b.name = pylos_leaderboard.name AND b.difficulty = pylos_leaderboard.difficulty)
+                WHERE id IN (
+                    SELECT MIN(id) FROM pylos_leaderboard GROUP BY name, difficulty HAVING COUNT(*) > 1
+                )
+            """)
+        cur.execute("""
+            DELETE FROM pylos_leaderboard
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM pylos_leaderboard GROUP BY name, difficulty
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Leaderboard consolidation error: {e}")
 
 
 def _calc_elo(ra, rb, outcome_a, k=32):
