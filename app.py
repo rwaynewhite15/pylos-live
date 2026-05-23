@@ -162,19 +162,21 @@ def leaderboard():
         cur = conn.cursor()
         if difficulty in ("easy", "medium", "hard"):
             cur.execute(
-                f"SELECT id, name, difficulty, wins, losses FROM pylos_leaderboard "
-                f"WHERE difficulty = {_PH} ORDER BY wins DESC, losses ASC LIMIT 20",
+                f"SELECT name, difficulty, SUM(wins), SUM(losses) FROM pylos_leaderboard "
+                f"WHERE difficulty = {_PH} GROUP BY name, difficulty "
+                f"ORDER BY SUM(wins) DESC, SUM(losses) ASC LIMIT 20",
                 (difficulty,)
             )
         else:
             cur.execute(
-                "SELECT id, name, difficulty, wins, losses FROM pylos_leaderboard "
-                "ORDER BY wins DESC, losses ASC LIMIT 20"
+                "SELECT name, difficulty, SUM(wins), SUM(losses) FROM pylos_leaderboard "
+                "GROUP BY name, difficulty "
+                "ORDER BY SUM(wins) DESC, SUM(losses) ASC LIMIT 20"
             )
         rows = cur.fetchall()
         conn.close()
         return jsonify([
-            {"id": r[0], "name": r[1], "difficulty": r[2], "wins": r[3], "losses": r[4]}
+            {"name": r[0], "difficulty": r[1], "wins": r[2], "losses": r[3]}
             for r in rows
         ])
     except Exception as e:
@@ -198,12 +200,23 @@ def submit_score():
     try:
         conn = _db_conn()
         cur = conn.cursor()
-        # Pylos has no ties — column is kept at 0 for schema compat.
         cur.execute(
-            f"INSERT INTO pylos_leaderboard (name, difficulty, wins, losses, ties) "
-            f"VALUES ({_PH}, {_PH}, {_PH}, {_PH}, 0)",
-            (name, difficulty, wins, losses)
+            f"SELECT id FROM pylos_leaderboard WHERE name = {_PH} AND difficulty = {_PH}",
+            (name, difficulty)
         )
+        existing = cur.fetchone()
+        if existing:
+            cur.execute(
+                f"UPDATE pylos_leaderboard SET wins = wins + {_PH}, losses = losses + {_PH} "
+                f"WHERE id = {_PH}",
+                (wins, losses, existing[0])
+            )
+        else:
+            cur.execute(
+                f"INSERT INTO pylos_leaderboard (name, difficulty, wins, losses, ties) "
+                f"VALUES ({_PH}, {_PH}, {_PH}, {_PH}, 0)",
+                (name, difficulty, wins, losses)
+            )
         conn.commit()
         conn.close()
         return jsonify({"ok": True})
